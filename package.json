@@ -18,7 +18,6 @@
   },
   "homepage": "https://github.com/Antonibustamante/greasebook-slack-bot#readme",
   "dependencies": {
-    "node-fetch": "^3.3.2",
     "openai": "^4.100.0"
   }
 }

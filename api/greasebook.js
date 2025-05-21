@@ -1,12 +1,14 @@
+export const config = { runtime: "edge" };
 
+import OpenAI from "openai-edge";
+import { URLSearchParams } from "url";
 
-import OpenAI from "openai";
-import fetch from "node-fetch";
-
-export default async function handler(req, res) {
-  const { text, response_url } = req.body;
-  // 1) Acknowledge immediately so Slack never times out
-  res.status(200).end();
+export default async function handler(request) {
+  // 1) Parse the incoming slash-command payload
+  const body = await request.text();
+  const params = new URLSearchParams(body);
+  const text = params.get("text");
+  const response_url = params.get("response_url");
 
   // 2) Query your OpenAI Assistant
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -25,4 +27,7 @@ export default async function handler(req, res) {
       text: answer,
     }),
   });
+
+  // 4) Acknowledge immediately
+  return new Response("", { status: 200 });
 }

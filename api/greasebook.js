@@ -28,6 +28,7 @@ export default async function handler(request) {
     }
   );
   const completionData = await completionRes.json();
+  console.log("OpenAI RAW RESPONSE:", JSON.stringify(completionData));
   const answer =
     completionData.choices?.[0]?.message?.content ||
     "Sorry, I couldn't get an answer.";

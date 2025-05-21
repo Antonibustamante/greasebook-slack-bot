@@ -1,17 +1,36 @@
 export const config = { runtime: "edge" };
 
-export default async function handler(request) {
-  // Parse Slack's form-encoded payload
-  const body = await request.text();
-  const params = new URLSearchParams(body);
-  const text = params.get("text");
-  const response_url = params.get("response_url");
-
-  // Call OpenAI Assistants API
-  const assistantId = process.env.OPENAI_ASSISTANT_ID;
+async function runCompletion(userPrompt) {
   const apiKey = process.env.OPENAI_API_KEY;
-  const completionRes = await fetch(
-    `https://api.openai.com/v1/assistants/${assistantId}/completions`,
+  const assistantId = process.env.OPENAI_ASSISTANT_ID;
+
+  // 1) Create a new thread
+  const threadRes = await fetch("https://api.openai.com/v1/threads", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({}),
+  });
+  const thread = await threadRes.json();
+
+  // 2) Post user message to thread
+  await fetch(`https://api.openai.com/v1/threads/${thread.id}/messages`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      role: "user",
+      content: userPrompt,
+    }),
+  });
+
+  // 3) Run the assistant on that thread
+  const runRes = await fetch(
+    `https://api.openai.com/v1/threads/${thread.id}/runs`,
     {
       method: "POST",
       headers: {
@@ -19,16 +38,46 @@ export default async function handler(request) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        messages: [{ role: "user", content: text }],
+        assistant_id: assistantId,
       }),
     }
   );
-  const completionData = await completionRes.json();
-  const answer =
-    completionData.choices?.[0]?.message?.content ||
-    "Sorry, I couldn't get an answer.";
+  const run = await runRes.json();
 
-  // Reply back to Slack inline
+  // 4) Poll until completed (max 10 tries)
+  let result;
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const pollRes = await fetch(
+      `https://api.openai.com/v1/threads/${thread.id}/runs/${run.id}`,
+      {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      }
+    );
+    result = await pollRes.json();
+    if (result.status === "completed") break;
+  }
+
+  // 5) Fetch all messages in thread and return the last assistant reply
+  const messagesRes = await fetch(
+    `https://api.openai.com/v1/threads/${thread.id}/messages`,
+    { headers: { Authorization: `Bearer ${apiKey}` } }
+  );
+  const messages = await messagesRes.json();
+  const last = messages.data?.[messages.data.length - 1];
+  return (last.content?.[0]?.text?.value) || "Sorry, I couldn't get an answer.";
+}
+
+export default async function handler(request) {
+  const body = await request.text();
+  const params = new URLSearchParams(body);
+  const text = params.get("text");
+  const response_url = params.get("response_url");
+
+  // Run the Assistant
+  const answer = await runCompletion(text);
+
+  // Post reply back into Slack
   await fetch(response_url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -39,5 +88,5 @@ export default async function handler(request) {
   });
 
   // Acknowledge immediately
-  return new Response("", { status: 200 });
+  return new Response(null, { status: 200 });
 }
